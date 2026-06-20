@@ -30,6 +30,8 @@ X_ACCESS_SECRET = os.environ.get("X_ACCESS_SECRET", "")
 # Optional: get a Telegram ping every time the bot posts.
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+# Optional: also auto-post the content to your public Telegram CHANNEL.
+TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 X_USERNAME = os.environ.get("X_USERNAME", "")  # e.g. Universflowapp (for clean links)
 
 HISTORY_FILE = pathlib.Path("history.json")
@@ -155,6 +157,30 @@ def send_telegram(message):
         print(f"(Telegram notify failed, ignoring: {e})")
 
 
+def post_to_telegram_channel(text):
+    """Auto-post the content to your public Telegram channel.
+    The bot must be an ADMIN of the channel. Skips if not configured."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID):
+        return
+    body = text
+    if "universflow.in" not in body:
+        body = f"{body}\n\n\U0001F3A7 universflow.in"
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        r = requests.post(
+            url,
+            json={"chat_id": TELEGRAM_CHANNEL_ID, "text": body,
+                  "disable_web_page_preview": False},
+            timeout=30,
+        )
+        if r.status_code == 200:
+            print("Posted to Telegram channel.")
+        else:
+            print(f"(Telegram channel post failed {r.status_code}: {r.text[:200]})")
+    except Exception as e:
+        print(f"(Telegram channel post failed, ignoring: {e})")
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
 
@@ -189,6 +215,9 @@ def main():
     resp = post_to_x(text)
     tweet_id = resp.data.get("id") if getattr(resp, "data", None) else "?"
     print(f"Posted to X. Tweet ID: {tweet_id}")
+
+    # Also auto-post the same content to your public Telegram channel
+    post_to_telegram_channel(text)
 
     # Build a clean link to the tweet
     if X_USERNAME and tweet_id != "?":
