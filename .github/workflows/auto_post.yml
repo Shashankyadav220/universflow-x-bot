@@ -1,0 +1,46 @@
+name: Univers Flow X Auto-Poster
+
+on:
+  schedule:
+    # Times are in UTC. India is UTC+5:30.
+    - cron: '30 4 * * *'    # 10:00 AM IST
+    - cron: '30 12 * * *'   # 6:00 PM IST
+  workflow_dispatch: {}      # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write            # needed so the bot can save post history back
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate and post to X
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python post.py
+
+      - name: Save post history
+        run: |
+          git config user.name "univers-flow-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.json || true
+          git commit -m "Update post history [skip ci]" || echo "No changes to commit"
+          git push || echo "Nothing to push"
