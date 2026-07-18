@@ -121,13 +121,13 @@ def generate_post(history):
     data = None
     for attempt in range(4):
         r = requests.post(url, json=payload, timeout=60)
-        if print(f"Gemini error {r.status_code}: {r.text}")
-        r.raise_for_status()
+        if r.status_code == 200:
             data = r.json()
             break
         if r.status_code == 429:  # rate limited — wait and retry
             time.sleep(8 * (attempt + 1))
             continue
+        print(f"Gemini error {r.status_code}: {r.text}")
         r.raise_for_status()
 
     if data is None:
