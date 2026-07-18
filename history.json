@@ -4,7 +4,7 @@ def load_history():
             data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
             if isinstance(data, list):
                 return data
-            return []  # reset if it's a dict or anything else
+            return []  # reset if corrupted (dict, string, etc.)
         except Exception:
             return []
     return []
