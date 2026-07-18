@@ -19,7 +19,7 @@ from knowledge import UNIVERS_FLOW_KNOWLEDGE
 # ----------------------------------------------------------------------------
 # Config (all secrets come from environment variables / GitHub Secrets)
 # ----------------------------------------------------------------------------
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("AQ.Ab8RN6LodWle8S_T23Mq2H--c-6LBdQbn7eS2xlxWa7HCQgb5Q, "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
 X_API_KEY = os.environ.get("X_API_KEY", "")
