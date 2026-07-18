@@ -1,11 +1,13 @@
 """
 Univers Flow — X (Twitter) auto-poster.
+
 Generates a fresh, human-sounding post about Univers Flow with Gemini,
 then publishes it to X. Runs free on GitHub Actions.
 
 Run locally to preview WITHOUT posting:
     python post.py --dry-run
 """
+
 import os
 import sys
 import json
@@ -13,29 +15,30 @@ import random
 import pathlib
 import requests
 import tweepy
-
 from knowledge import UNIVERS_FLOW_KNOWLEDGE
 
 # ----------------------------------------------------------------------------
 # Config (all secrets come from environment variables / GitHub Secrets)
 # ----------------------------------------------------------------------------
-GEMINI_API_KEY = os.environ.get("AQ.Ab8RN6LodWle8S_T23Mq2H--c-6LBdQbn7eS2xlxWa7HCQgb5Q, "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
-X_API_KEY = os.environ.get("X_API_KEY", "")
-X_API_SECRET = os.environ.get("X_API_SECRET", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+
+X_API_KEY      = os.environ.get("X_API_KEY", "")
+X_API_SECRET   = os.environ.get("X_API_SECRET", "")
 X_ACCESS_TOKEN = os.environ.get("X_ACCESS_TOKEN", "")
-X_ACCESS_SECRET = os.environ.get("X_ACCESS_SECRET", "")
+X_ACCESS_SECRET= os.environ.get("X_ACCESS_SECRET", "")
 
 # Optional: get a Telegram ping every time the bot posts.
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID", "")
+
 # Optional: also auto-post the content to your public Telegram CHANNEL.
 TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
-X_USERNAME = os.environ.get("X_USERNAME", "")  # e.g. Universflowapp (for clean links)
 
+X_USERNAME   = os.environ.get("X_USERNAME", "")  # e.g. Universflowapp
 HISTORY_FILE = pathlib.Path("history.json")
-MAX_LEN = 275  # keep a little buffer under X's 280 limit
+MAX_LEN      = 275  # keep a little buffer under X's 280 limit
 
 # Different "angles" keep posts varied so it never feels repetitive/botty.
 ANGLES = [
@@ -55,7 +58,10 @@ ANGLES = [
 def load_history():
     if HISTORY_FILE.exists():
         try:
-            return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+            data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data
+            return []  # reset if corrupted (dict, string, etc.)
         except Exception:
             return []
     return []
@@ -72,6 +78,7 @@ def build_prompt(angle, history):
     return f"""You are the social media voice of Univers Flow, writing ONE tweet (X post).
 
 Use ONLY the facts in this knowledge base — never invent features or claims:
+
 {UNIVERS_FLOW_KNOWLEDGE}
 
 ANGLE FOR THIS POST:
@@ -94,8 +101,9 @@ Output ONLY the tweet text. No quotes, no explanation, no label."""
 
 
 def generate_post(history):
-    angle = random.choice(ANGLES)
+    angle  = random.choice(ANGLES)
     prompt = build_prompt(angle, history)
+
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -108,6 +116,7 @@ def generate_post(history):
             "maxOutputTokens": 200,
         },
     }
+
     import time
     data = None
     for attempt in range(4):
@@ -119,8 +128,10 @@ def generate_post(history):
             time.sleep(8 * (attempt + 1))
             continue
         r.raise_for_status()
+
     if data is None:
         raise RuntimeError("Gemini rate-limited after retries — try again later.")
+
     text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
     # Strip stray wrapping quotes the model sometimes adds
     text = text.strip().strip('"').strip("'").strip()
@@ -138,8 +149,7 @@ def post_to_x(text):
 
 
 def send_telegram(message):
-    """Send a Telegram message. Silently skips if not configured.
-    Never crashes the bot if Telegram fails."""
+    """Send a Telegram message. Silently skips if not configured."""
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
         return
     try:
@@ -158,13 +168,14 @@ def send_telegram(message):
 
 
 def post_to_telegram_channel(text):
-    """Auto-post the content to your public Telegram channel.
-    The bot must be an ADMIN of the channel. Skips if not configured."""
+    """Auto-post the content to your public Telegram channel."""
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID):
         return
+
     body = text
     if "universflow.in" not in body:
-        body = f"{body}\n\n\U0001F3A7 universflow.in"
+        body = f"{body}\n\n🎧 universflow.in"
+
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         r = requests.post(
@@ -187,11 +198,11 @@ def main():
     if not GEMINI_API_KEY:
         sys.exit("ERROR: GEMINI_API_KEY is not set.")
 
-    history = load_history()
+    history     = load_history()
     text, angle = generate_post(history)
 
     if len(text) > MAX_LEN:
-        text = text[: MAX_LEN - 1].rstrip() + "\u2026"
+        text = text[: MAX_LEN - 1].rstrip() + "…"
 
     print(f"Angle : {angle}")
     print(f"Length: {len(text)} chars")
@@ -204,22 +215,27 @@ def main():
         return
 
     for key, name in [
-        (X_API_KEY, "X_API_KEY"),
-        (X_API_SECRET, "X_API_SECRET"),
+        (X_API_KEY,      "X_API_KEY"),
+        (X_API_SECRET,   "X_API_SECRET"),
         (X_ACCESS_TOKEN, "X_ACCESS_TOKEN"),
-        (X_ACCESS_SECRET, "X_ACCESS_SECRET"),
+        (X_ACCESS_SECRET,"X_ACCESS_SECRET"),
     ]:
         if not key:
             sys.exit(f"ERROR: {name} is not set.")
 
-    resp = post_to_x(text)
+    # Strip any accidental whitespace from tokens before using them
+    client = tweepy.Client(
+        consumer_key=X_API_KEY.strip(),
+        consumer_secret=X_API_SECRET.strip(),
+        access_token=X_ACCESS_TOKEN.strip(),
+        access_token_secret=X_ACCESS_SECRET.strip(),
+    )
+    resp     = client.create_tweet(text=text)
     tweet_id = resp.data.get("id") if getattr(resp, "data", None) else "?"
     print(f"Posted to X. Tweet ID: {tweet_id}")
 
-    # Also auto-post the same content to your public Telegram channel
     post_to_telegram_channel(text)
 
-    # Build a clean link to the tweet
     if X_USERNAME and tweet_id != "?":
         tweet_url = f"https://x.com/{X_USERNAME}/status/{tweet_id}"
     elif tweet_id != "?":
@@ -227,11 +243,10 @@ def main():
     else:
         tweet_url = "https://x.com/"
 
-    # Ping Telegram with what just went out
     send_telegram(
-        "\u2705 Univers Flow bot just posted on X:\n\n"
-        f"\u201c{text}\u201d\n\n"
-        f"\U0001F517 {tweet_url}"
+        "✅ Univers Flow bot just posted on X:\n\n"
+        f"\"{text}\"\n\n"
+        f"🔗 {tweet_url}"
     )
 
     history.append(text)
