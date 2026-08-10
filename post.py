@@ -125,7 +125,7 @@ def generate_post(history):
             data = r.json()
             break
         if r.status_code == 429:  # rate limited — wait and retry
-            time.sleep(8 * (attempt + 1))
+            time.sleep(30 * (attempt + 1))
             continue
         print(f"Gemini error {r.status_code}: {r.text}")
         r.raise_for_status()
