@@ -22,7 +22,7 @@ from knowledge import UNIVERS_FLOW_KNOWLEDGE
 # ----------------------------------------------------------------------------
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 X_API_KEY      = os.environ.get("X_API_KEY", "")
 X_API_SECRET   = os.environ.get("X_API_SECRET", "")
