@@ -1,6 +1,5 @@
 """
 Univers Flow — X (Twitter) auto-poster (Selenium version).
-
 Generates a post with Gemini, then posts it to X via browser automation.
 No X API needed — runs 100% free on GitHub Actions.
 
@@ -26,7 +25,7 @@ GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 
 X_EMAIL    = os.environ.get("X_EMAIL", "")
 X_PASSWORD = os.environ.get("X_PASSWORD", "")
-X_USERNAME = os.environ.get("X_USERNAME", "")  # e.g. Universflowapp
+X_USERNAME = os.environ.get("X_USERNAME", "")
 
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -39,7 +38,7 @@ ANGLES = [
     "Share one specific feature and why it's genuinely useful (e.g. offline downloads, free streaming, follow artists).",
     "Ask the audience a casual, relatable music question (no link, just start a conversation).",
     "Post a relatable everyday music moment (commute, gym, study, late-night vibes) and tie it to the app naturally.",
-    "Position it as a free alternative to paid streaming apps, friendly and confident (not bashing competitors hard).",
+    "Position it as a free alternative to paid streaming apps, friendly and confident.",
     "Drop a quick tip about how to do something in the app (like saving songs for offline).",
     "Hype a benefit: zero cost, millions of songs, listen offline — keep it punchy and real.",
     "Talk to students / people who don't want to pay for music.",
@@ -76,27 +75,24 @@ def build_prompt(angle, history):
     recent = "\n".join(f"- {h}" for h in history[-15:]) or "(no posts yet)"
     return f"""You are the social media voice of Univers Flow, writing ONE tweet (X post).
 
-Use ONLY the facts in this knowledge base — never invent features or claims:
-
+Use ONLY the facts in this knowledge base:
 {UNIVERS_FLOW_KNOWLEDGE}
 
 ANGLE FOR THIS POST:
 {angle}
 
-VOICE & STYLE RULES:
-- Sound like a real person who loves music and happens to use this app.
-- Casual, natural, a bit of personality. Contractions are good.
-- Keep it UNDER 275 characters total.
-- Use 0 to 2 emojis max. Sometimes use none.
-- Hashtags: 0 to 2 max, only if natural. Often none.
-- Include the link https://universflow.in only SOMETIMES (roughly half the posts).
-- NO corporate buzzwords, NO "Check out our app!", NO excessive caps.
-- Vary sentence structure. Don't start with the brand name every time.
+RULES:
+- Sound like a real person, casual and natural.
+- UNDER 275 characters total.
+- 0-2 emojis max, sometimes none.
+- 0-2 hashtags max, often none.
+- Include https://universflow.in only sometimes (about half the posts).
+- NO corporate buzzwords or "Check out our app!".
 
-AVOID repeating the wording or topic of these recent posts:
+AVOID repeating these recent posts:
 {recent}
 
-Output ONLY the tweet text. No quotes, no explanation, no label."""
+Output ONLY the tweet text. No quotes, no labels, no explanation."""
 
 
 def generate_post(history):
@@ -110,7 +106,7 @@ def generate_post(history):
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 1.05,
+            "temperature": 1.0,
             "topP": 0.95,
             "maxOutputTokens": 200,
         },
@@ -129,7 +125,7 @@ def generate_post(history):
         r.raise_for_status()
 
     if data is None:
-        raise RuntimeError("Gemini rate-limited after retries — try again later.")
+        raise RuntimeError("Gemini rate-limited after retries.")
 
     text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
     text = text.strip().strip('"').strip("'").strip()
@@ -146,7 +142,6 @@ def post_to_x_selenium(text):
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
 
     print("Starting Chrome...")
     options = Options()
@@ -165,41 +160,66 @@ def post_to_x_selenium(text):
     )
 
     driver = webdriver.Chrome(options=options)
-    wait   = WebDriverWait(driver, 30)
+    wait   = WebDriverWait(driver, 40)
 
     try:
-        # ── Step 1: Go to login page ──────────────────────────────────────
+        # Step 1: Open login page
         print("Opening X login page...")
         driver.get("https://x.com/i/flow/login")
-        time.sleep(3)
+        time.sleep(5)
+        driver.save_screenshot("/tmp/step1.png")
+        print(f"Page title: {driver.title}")
+        print(f"Current URL: {driver.current_url}")
 
-        # ── Step 2: Enter email/username ──────────────────────────────────
+        # Step 2: Find and fill email input — try multiple selectors
         print("Entering email...")
-        email_input = wait.until(EC.presence_of_element_located(
-            (By.CSS_SELECTOR, 'input[autocomplete="username"]')
-        ))
+        email_input = None
+        selectors = [
+            'input[autocomplete="username"]',
+            'input[name="text"]',
+            'input[type="text"]',
+        ]
+        for sel in selectors:
+            try:
+                email_input = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, sel))
+                )
+                print(f"Found input with: {sel}")
+                break
+            except Exception:
+                continue
+
+        if not email_input:
+            driver.save_screenshot("/tmp/selenium_error.png")
+            raise RuntimeError("Could not find email input. Screenshot saved.")
+
         email_input.click()
         time.sleep(0.5)
         for char in X_EMAIL:
             email_input.send_keys(char)
-            time.sleep(0.05)
+            time.sleep(0.04)
         time.sleep(1)
         email_input.send_keys(Keys.RETURN)
-        time.sleep(3)
+        time.sleep(4)
+        driver.save_screenshot("/tmp/step2.png")
 
-        # ── Step 3: Handle "unusual activity" username check ──────────────
+        # Step 3: Handle unusual activity check (username prompt)
         try:
-            unusual = driver.find_element(By.CSS_SELECTOR, 'input[data-testid="ocfEnterTextTextInput"]')
+            unusual = WebDriverWait(driver, 6).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, 'input[data-testid="ocfEnterTextTextInput"]')
+                )
+            )
             print("Unusual activity check — entering username...")
             for char in X_USERNAME:
                 unusual.send_keys(char)
-                time.sleep(0.05)
+                time.sleep(0.04)
             unusual.send_keys(Keys.RETURN)
-            time.sleep(3)
+            time.sleep(4)
         except Exception:
-            pass  # No unusual activity check, continue normally
+            print("No unusual activity check, continuing...")
 
-        # ── Step 4: Enter password ────────────────────────────────────────
+        # Step 4: Enter password
         print("Entering password...")
         pwd_input = wait.until(EC.presence_of_element_located(
             (By.CSS_SELECTOR, 'input[name="password"]')
@@ -208,55 +228,55 @@ def post_to_x_selenium(text):
         time.sleep(0.5)
         for char in X_PASSWORD:
             pwd_input.send_keys(char)
-            time.sleep(0.05)
+            time.sleep(0.04)
         time.sleep(1)
         pwd_input.send_keys(Keys.RETURN)
-        time.sleep(5)
+        time.sleep(6)
+        driver.save_screenshot("/tmp/step3.png")
+        print(f"URL after login: {driver.current_url}")
 
-        print(f"Current URL after login: {driver.current_url}")
+        # Step 5: Verify login
+        if "login" in driver.current_url:
+            driver.save_screenshot("/tmp/selenium_error.png")
+            raise RuntimeError("Login failed — check X_EMAIL and X_PASSWORD.")
 
-        # ── Step 5: Check we're logged in ────────────────────────────────
-        if "login" in driver.current_url or "error" in driver.current_url:
-            driver.save_screenshot("/tmp/login_error.png")
-            raise RuntimeError("Login failed — check X_EMAIL and X_PASSWORD secrets.")
-
-        # ── Step 6: Click the post/compose button ─────────────────────────
+        # Step 6: Click compose button
         print("Finding compose button...")
         time.sleep(2)
         compose_btn = wait.until(EC.element_to_be_clickable(
             (By.CSS_SELECTOR, 'a[data-testid="SideNav_NewTweet_Button"]')
         ))
         compose_btn.click()
-        time.sleep(2)
+        time.sleep(3)
+        driver.save_screenshot("/tmp/step4.png")
 
-        # ── Step 7: Type the post text ────────────────────────────────────
+        # Step 7: Type post text
         print("Typing post text...")
         tweet_box = wait.until(EC.presence_of_element_located(
             (By.CSS_SELECTOR, 'div[data-testid="tweetTextarea_0"]')
         ))
         tweet_box.click()
         time.sleep(0.5)
-
-        # Type character by character to avoid paste detection
         for char in text:
             tweet_box.send_keys(char)
             time.sleep(0.03)
         time.sleep(2)
+        driver.save_screenshot("/tmp/step5.png")
 
-        # ── Step 8: Click Post button ─────────────────────────────────────
+        # Step 8: Click Post button
         print("Clicking Post button...")
         post_btn = wait.until(EC.element_to_be_clickable(
             (By.CSS_SELECTOR, 'button[data-testid="tweetButtonInline"]')
         ))
         post_btn.click()
-        time.sleep(4)
+        time.sleep(5)
+        driver.save_screenshot("/tmp/step6.png")
 
-        print("✅ Posted to X successfully via browser!")
+        print("✅ Posted to X successfully!")
         return True
 
     except Exception as e:
         driver.save_screenshot("/tmp/selenium_error.png")
-        print(f"Screenshot saved to /tmp/selenium_error.png")
         raise e
     finally:
         driver.quit()
@@ -269,12 +289,11 @@ def send_telegram(message):
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
         return
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "disable_web_page_preview": False,
-        }, timeout=30)
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": message},
+            timeout=30,
+        )
     except Exception as e:
         print(f"(Telegram notify failed: {e})")
 
@@ -282,20 +301,14 @@ def send_telegram(message):
 def post_to_telegram_channel(text):
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID):
         return
-    body = text
-    if "universflow.in" not in body:
-        body = f"{body}\n\n🎧 universflow.in"
+    body = text if "universflow.in" in text else f"{text}\n\n🎧 universflow.in"
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        r = requests.post(url, json={
-            "chat_id": TELEGRAM_CHANNEL_ID,
-            "text": body,
-            "disable_web_page_preview": False,
-        }, timeout=30)
-        if r.status_code == 200:
-            print("Posted to Telegram channel.")
-        else:
-            print(f"(Telegram channel failed {r.status_code}: {r.text[:200]})")
+        r = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHANNEL_ID, "text": body},
+            timeout=30,
+        )
+        print("Posted to Telegram channel." if r.status_code == 200 else f"Telegram failed: {r.text[:200]}")
     except Exception as e:
         print(f"(Telegram channel failed: {e})")
 
@@ -332,9 +345,7 @@ def main():
     post_to_telegram_channel(text)
 
     tweet_url = f"https://x.com/{X_USERNAME}" if X_USERNAME else "https://x.com/"
-    send_telegram(
-        f"✅ Univers Flow bot just posted on X:\n\n\"{text}\"\n\n🔗 {tweet_url}"
-    )
+    send_telegram(f"✅ Univers Flow posted on X:\n\n\"{text}\"\n\n🔗 {tweet_url}")
 
     history.append(text)
     save_history(history)
