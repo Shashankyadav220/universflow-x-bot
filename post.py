@@ -224,15 +224,7 @@ def post_to_x_selenium(text):
         pwd_input = wait.until(EC.presence_of_element_located(
             (By.CSS_SELECTOR, 'input[name="password"]')
         ))
-                driver.execute_script("arguments[0].click();", pwd_input)
-        time.sleep(0.5)
-        driver.execute_script("arguments[0].removeAttribute('style');", pwd_input)
-        driver.execute_script("arguments[0].style.opacity = '1';", pwd_input)
-        driver.execute_script("arguments[0].style.pointerEvents = 'auto';", pwd_input)
-        time.sleep(0.3)
-        from selenium.webdriver.common.action_chains import ActionChains
-        actions = ActionChains(driver)
-        actions.click(pwd_input).perform()
+        pwd_input.click()
         time.sleep(0.5)
         for char in X_PASSWORD:
             pwd_input.send_keys(char)
