@@ -133,34 +133,60 @@ def post_to_x_selenium(text):
         except Exception:
             print("No verification check needed.")
 
-        # Password field — use JavaScript to bypass the overlay
+        # Password — click the visible container div, then use keyboard to type
         print("Entering password...")
-        pwd_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="password"]')))
+        time.sleep(2)
+
+        # Click the visible label/container that overlays the password input
+        try:
+            pwd_container = driver.find_element(By.CSS_SELECTOR, 'div.jf-float-label-container')
+            driver.execute_script("arguments[0].click();", pwd_container)
+            print("Clicked password container div")
+            time.sleep(0.5)
+        except Exception:
+            print("No container div found, trying input directly...")
+
+        # Now find the password input and use JS to type into it
+        pwd_input = driver.find_element(By.CSS_SELECTOR, 'input[name="password"]')
         driver.execute_script("""
             var el = arguments[0];
-            el.removeAttribute('style');
-            el.style.cssText = 'position:relative!important;opacity:1!important;pointer-events:auto!important;';
-            el.focus();
-        """, pwd_input)
+            var pwd = arguments[1];
+            var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeInputValueSetter.call(el, pwd);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        """, pwd_input, X_PASSWORD)
         time.sleep(0.5)
-        driver.execute_script("arguments[0].value = arguments[1];", pwd_input, X_PASSWORD)
-        driver.execute_script("arguments[0].dispatchEvent(new Event('input', {bubbles:true}));", pwd_input)
-        driver.execute_script("arguments[0].dispatchEvent(new Event('change', {bubbles:true}));", pwd_input)
-        time.sleep(0.5)
-        pwd_input.send_keys(Keys.RETURN)
+        print("Password set via JS. Submitting...")
+
+        # Find and click the login button
+        try:
+            login_btn = driver.find_element(By.CSS_SELECTOR, 'div[data-testid="LoginForm_Login_Button"]')
+            driver.execute_script("arguments[0].click();", login_btn)
+            print("Clicked login button")
+        except Exception:
+            # Fallback: press Enter on the password field
+            pwd_input.send_keys(Keys.RETURN)
+            print("Pressed Enter to submit")
+
         time.sleep(6)
         print(f"URL after login: {driver.current_url}")
+        driver.save_screenshot("/tmp/after_login.png")
 
-        if "login" in driver.current_url or "flow" in driver.current_url:
+        if "login" in driver.current_url or (driver.current_url == "https://x.com/i/jf/onboarding/web?mode=login"):
             driver.save_screenshot("/tmp/login_failed.png")
             raise RuntimeError("Login failed — check X_EMAIL and X_PASSWORD secrets.")
 
-        print("Logged in! Finding compose button...")
+        print("Logged in successfully!")
         time.sleep(2)
+
+        # Compose button
+        print("Finding compose button...")
         compose_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[data-testid="SideNav_NewTweet_Button"]')))
         compose_btn.click()
         time.sleep(3)
 
+        # Type post
         print("Typing post...")
         tweet_box = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[data-testid="tweetTextarea_0"]')))
         tweet_box.click()
@@ -170,6 +196,7 @@ def post_to_x_selenium(text):
             time.sleep(0.03)
         time.sleep(2)
 
+        # Post button
         print("Clicking Post button...")
         post_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="tweetButtonInline"]')))
         post_btn.click()
