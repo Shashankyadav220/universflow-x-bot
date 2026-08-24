@@ -99,15 +99,15 @@ def post_to_x_selenium(text):
         print("Opening X login page...")
         driver.get("https://x.com/i/flow/login")
         time.sleep(5)
-        print(f"Title: {driver.title} | URL: {driver.current_url}")
+        print(f"URL: {driver.current_url}")
 
-        # Email field
+        # Email
         print("Entering email...")
         email_input = None
         for sel in ['input[autocomplete="username"]', 'input[name="text"]', 'input[type="text"]']:
             try:
                 email_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
-                print(f"Found with: {sel}")
+                print(f"Found email with: {sel}")
                 break
             except Exception:
                 continue
@@ -133,29 +133,32 @@ def post_to_x_selenium(text):
         except Exception:
             print("No verification check needed.")
 
-        # Password — use JS native setter
+        # Password — click container div to focus, then send_keys to the body
         print("Entering password...")
         time.sleep(2)
+        driver.save_screenshot("/tmp/before_password.png")
+        print(f"Page source snippet: {driver.page_source[2000:3000]}")
+
+        # Try clicking the visible password container
         try:
             pwd_container = driver.find_element(By.CSS_SELECTOR, 'div.jf-float-label-container')
             driver.execute_script("arguments[0].click();", pwd_container)
-            print("Clicked password container div")
+            print("Clicked password container")
             time.sleep(0.5)
-        except Exception:
-            print("No container div found.")
+        except Exception as ex:
+            print(f"No container: {ex}")
 
+        # Focus the hidden input via JS then send keys to active element
         pwd_input = driver.find_element(By.CSS_SELECTOR, 'input[name="password"]')
-        driver.execute_script("""
-            var el = arguments[0];
-            var pwd = arguments[1];
-            var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            nativeInputValueSetter.call(el, pwd);
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-        """, pwd_input, X_PASSWORD)
+        driver.execute_script("arguments[0].focus();", pwd_input)
         time.sleep(0.5)
-        print("Password set via JS. Submitting...")
-        pwd_input.send_keys(Keys.RETURN)
+        # Send keys to the active focused element
+        active = driver.switch_to.active_element
+        for char in X_PASSWORD:
+            active.send_keys(char)
+            time.sleep(0.05)
+        time.sleep(0.5)
+        active.send_keys(Keys.RETURN)
         time.sleep(6)
         print(f"URL after login: {driver.current_url}")
         driver.save_screenshot("/tmp/after_login.png")
@@ -163,51 +166,38 @@ def post_to_x_selenium(text):
         if driver.current_url == "https://x.com/i/jf/onboarding/web?mode=login":
             raise RuntimeError("Login failed — check X_EMAIL and X_PASSWORD secrets.")
 
-        # Handle knowledge check / onboarding pages
-        max_wait = 20
-        waited = 0
-        while ("knowledge_check" in driver.current_url or 
-               "onboarding" in driver.current_url or
-               "jf" in driver.current_url) and waited < max_wait:
-            print(f"On intermediate page: {driver.current_url} — waiting...")
-            driver.save_screenshot(f"/tmp/intermediate_{waited}.png")
-            
-            # Try clicking any "Next", "Continue", "Skip" buttons
-            for btn_text in ["Next", "Continue", "Skip for now", "Skip", "Done"]:
+        # Handle any intermediate pages (knowledge check, onboarding)
+        for _ in range(10):
+            cur = driver.current_url
+            if "home" in cur or ("x.com" in cur and "jf" not in cur and "onboarding" not in cur):
+                break
+            print(f"Intermediate page: {cur}")
+            for btn_text in ["Next", "Continue", "Skip for now", "Skip", "Done", "Agree"]:
                 try:
                     btns = driver.find_elements(By.XPATH, f"//span[text()='{btn_text}']")
                     if btns:
                         driver.execute_script("arguments[0].click();", btns[0])
-                        print(f"Clicked '{btn_text}' button")
+                        print(f"Clicked '{btn_text}'")
                         time.sleep(3)
                         break
                 except Exception:
-                    continue
-            
+                    pass
             time.sleep(3)
-            waited += 3
 
-        print(f"Final URL: {driver.current_url}")
-        print("Proceeding to post...")
-        
-        # Navigate directly to home to ensure we're on the right page
+        # Go directly to home
         driver.get("https://x.com/home")
-        time.sleep(4)
+        time.sleep(5)
         print(f"Home URL: {driver.current_url}")
 
-        # Compose button
+        # Compose
         print("Finding compose button...")
-        compose_btn = wait.until(EC.element_to_be_clickable(
-            (By.CSS_SELECTOR, 'a[data-testid="SideNav_NewTweet_Button"]')
-        ))
+        compose_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[data-testid="SideNav_NewTweet_Button"]')))
         compose_btn.click()
         time.sleep(3)
 
-        # Type post
+        # Type
         print("Typing post...")
-        tweet_box = wait.until(EC.presence_of_element_located(
-            (By.CSS_SELECTOR, 'div[data-testid="tweetTextarea_0"]')
-        ))
+        tweet_box = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[data-testid="tweetTextarea_0"]')))
         tweet_box.click()
         time.sleep(0.5)
         for char in text:
@@ -215,11 +205,9 @@ def post_to_x_selenium(text):
             time.sleep(0.03)
         time.sleep(2)
 
-        # Post button
+        # Post
         print("Clicking Post button...")
-        post_btn = wait.until(EC.element_to_be_clickable(
-            (By.CSS_SELECTOR, 'button[data-testid="tweetButtonInline"]')
-        ))
+        post_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="tweetButtonInline"]')))
         post_btn.click()
         time.sleep(5)
         print("✅ Posted to X successfully!")
