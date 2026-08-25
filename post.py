@@ -2,7 +2,7 @@ import os, sys, json, time, random, pathlib, requests
 from knowledge import UNIVERS_FLOW_KNOWLEDGE
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama3-70b-8192")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-70b-versatile")
 X_EMAIL        = os.environ.get("X_EMAIL", "")
 X_PASSWORD     = os.environ.get("X_PASSWORD", "")
 X_USERNAME     = os.environ.get("X_USERNAME", "")
