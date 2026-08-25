@@ -2,7 +2,7 @@ import os, sys, json, time, random, pathlib, requests
 from knowledge import UNIVERS_FLOW_KNOWLEDGE
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 X_EMAIL        = os.environ.get("X_EMAIL", "")
 X_PASSWORD     = os.environ.get("X_PASSWORD", "")
 X_USERNAME     = os.environ.get("X_USERNAME", "")
@@ -87,6 +87,10 @@ Output ONLY the tweet text. No quotes, no labels."""
                 if "decommissioned" in error_msg.lower():
                     sys.exit(f"ERROR: Model '{GROQ_MODEL}' is decommissioned. Check https://console.groq.com/docs/models for active models.")
                 r.raise_for_status()
+            elif r.status_code == 404:
+                error_msg = r.json().get("error", {}).get("message", "Unknown error")
+                print(f"Groq API error (404): {error_msg}")
+                sys.exit(f"ERROR: Model '{GROQ_MODEL}' does not exist or you don't have access. Check https://console.groq.com/docs/models for available models.")
             else:
                 print(f"Unexpected error {r.status_code}: {r.text}")
                 r.raise_for_status()
