@@ -9,6 +9,7 @@ X_USERNAME     = os.environ.get("X_USERNAME", "")
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID", "")
 TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
+GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
 HISTORY_FILE = pathlib.Path("history.json")
 MAX_LEN = 275
 
