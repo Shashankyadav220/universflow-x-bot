@@ -1,8 +1,8 @@
 import os, sys, json, time, random, pathlib, requests
 from knowledge import UNIVERS_FLOW_KNOWLEDGE
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama3-70b-8192")
 X_EMAIL        = os.environ.get("X_EMAIL", "")
 X_PASSWORD     = os.environ.get("X_PASSWORD", "")
 X_USERNAME     = os.environ.get("X_USERNAME", "")
@@ -58,20 +58,29 @@ AVOID repeating: {recent}
 
 Output ONLY the tweet text. No quotes, no labels."""
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 1.0, "topP": 0.95, "maxOutputTokens": 200}}
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 1.0,
+        "max_tokens": 200,
+    }
 
     for attempt in range(4):
-        r = requests.post(url, json=payload, timeout=60)
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
         if r.status_code == 200:
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip().strip('"').strip("'").strip()
+            text = r.json()["choices"][0]["message"]["content"].strip().strip('"').strip("'").strip()
             return text, angle
-        if r.status_code == 429:
-            time.sleep(30 * (attempt + 1))
+        if r.status_code in (429, 503, 500):
+            time.sleep(15 * (attempt + 1))
             continue
-        print(f"Gemini error {r.status_code}: {r.text}")
+        print(f"Groq error {r.status_code}: {r.text}")
         r.raise_for_status()
-    raise RuntimeError("Gemini rate-limited after retries.")
+    raise RuntimeError("Groq unavailable after retries — try again later.")
 
 def post_to_x_selenium(text):
     from selenium import webdriver
@@ -86,93 +95,76 @@ def post_to_x_selenium(text):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,900")
+    options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
-    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
     driver = webdriver.Chrome(options=options)
     wait = WebDriverWait(driver, 40)
 
     try:
-        print("Opening X login page...")
-        driver.get("https://x.com/i/flow/login")
+        # Use twitter.com login which uses standard HTML form
+        print("Opening login page...")
+        driver.get("https://twitter.com/login")
         time.sleep(5)
         print(f"URL: {driver.current_url}")
+        driver.save_screenshot("/tmp/step1_login.png")
 
         # Email
         print("Entering email...")
-        email_input = None
-        for sel in ['input[autocomplete="username"]', 'input[name="text"]', 'input[type="text"]']:
-            try:
-                email_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
-                print(f"Found email with: {sel}")
-                break
-            except Exception:
-                continue
-        if not email_input:
-            raise RuntimeError("Could not find email input.")
-        driver.execute_script("arguments[0].click();", email_input)
+        email_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[autocomplete="username"]')))
+        email_input.click()
         time.sleep(0.5)
         for char in X_EMAIL:
             email_input.send_keys(char)
-            time.sleep(0.04)
+            time.sleep(0.05)
+        time.sleep(1)
         email_input.send_keys(Keys.RETURN)
-        time.sleep(4)
+        time.sleep(3)
+        driver.save_screenshot("/tmp/step2_after_email.png")
+        print(f"URL after email: {driver.current_url}")
 
         # Unusual activity check
         try:
-            unusual = WebDriverWait(driver, 6).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[data-testid="ocfEnterTextTextInput"]')))
-            print("Entering username for verification...")
+            unusual = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[data-testid="ocfEnterTextTextInput"]')))
+            print("Username verification needed...")
             for char in X_USERNAME:
                 unusual.send_keys(char)
-                time.sleep(0.04)
+                time.sleep(0.05)
             unusual.send_keys(Keys.RETURN)
-            time.sleep(4)
+            time.sleep(3)
         except Exception:
-            print("No verification check needed.")
+            print("No username verification needed.")
 
-        # Password — click container div to focus, then send_keys to the body
+        # Password
         print("Entering password...")
-        time.sleep(2)
-        driver.save_screenshot("/tmp/before_password.png")
-        print(f"Page source snippet: {driver.page_source[2000:3000]}")
-
-        # Try clicking the visible password container
-        try:
-            pwd_container = driver.find_element(By.CSS_SELECTOR, 'div.jf-float-label-container')
-            driver.execute_script("arguments[0].click();", pwd_container)
-            print("Clicked password container")
-            time.sleep(0.5)
-        except Exception as ex:
-            print(f"No container: {ex}")
-
-        # Focus the hidden input via JS then send keys to active element
-        pwd_input = driver.find_element(By.CSS_SELECTOR, 'input[name="password"]')
-        driver.execute_script("arguments[0].focus();", pwd_input)
+        pwd_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="password"]')))
+        print(f"Password input found. Type: {pwd_input.get_attribute('type')}")
+        pwd_input.click()
         time.sleep(0.5)
-        # Send keys to the active focused element
-        active = driver.switch_to.active_element
         for char in X_PASSWORD:
-            active.send_keys(char)
+            pwd_input.send_keys(char)
             time.sleep(0.05)
-        time.sleep(0.5)
-        active.send_keys(Keys.RETURN)
+        time.sleep(1)
+        driver.save_screenshot("/tmp/step3_password_filled.png")
+        pwd_input.send_keys(Keys.RETURN)
         time.sleep(6)
         print(f"URL after login: {driver.current_url}")
-        driver.save_screenshot("/tmp/after_login.png")
+        driver.save_screenshot("/tmp/step4_after_login.png")
 
-        if driver.current_url == "https://x.com/i/jf/onboarding/web?mode=login":
-            raise RuntimeError("Login failed — check X_EMAIL and X_PASSWORD secrets.")
+        # Check login success
+        if "login" in driver.current_url and "home" not in driver.current_url:
+            raise RuntimeError(f"Login failed. Still at: {driver.current_url}")
 
-        # Handle any intermediate pages (knowledge check, onboarding)
-        for _ in range(10):
+        # Handle intermediate pages
+        for _ in range(8):
             cur = driver.current_url
-            if "home" in cur or ("x.com" in cur and "jf" not in cur and "onboarding" not in cur):
+            print(f"Current: {cur}")
+            if "x.com/home" in cur or "twitter.com/home" in cur:
                 break
-            print(f"Intermediate page: {cur}")
-            for btn_text in ["Next", "Continue", "Skip for now", "Skip", "Done", "Agree"]:
+            for btn_text in ["Skip for now", "Skip", "Next", "Continue", "Done", "Agree"]:
                 try:
                     btns = driver.find_elements(By.XPATH, f"//span[text()='{btn_text}']")
                     if btns:
@@ -184,10 +176,11 @@ def post_to_x_selenium(text):
                     pass
             time.sleep(3)
 
-        # Go directly to home
+        # Navigate to home
         driver.get("https://x.com/home")
         time.sleep(5)
-        print(f"Home URL: {driver.current_url}")
+        print(f"Home: {driver.current_url}")
+        driver.save_screenshot("/tmp/step5_home.png")
 
         # Compose
         print("Finding compose button...")
@@ -205,7 +198,7 @@ def post_to_x_selenium(text):
             time.sleep(0.03)
         time.sleep(2)
 
-        # Post
+        # Submit
         print("Clicking Post button...")
         post_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="tweetButtonInline"]')))
         post_btn.click()
@@ -238,8 +231,8 @@ def post_to_telegram_channel(text):
 
 def main():
     dry_run = "--dry-run" in sys.argv
-    if not GEMINI_API_KEY:
-        sys.exit("ERROR: GEMINI_API_KEY is not set.")
+    if not GROQ_API_KEY:
+        sys.exit("ERROR: GROQ_API_KEY is not set.")
     if not dry_run and (not X_EMAIL or not X_PASSWORD):
         sys.exit("ERROR: X_EMAIL or X_PASSWORD is not set.")
 
