@@ -2,7 +2,7 @@ import os, sys, json, time, random, pathlib, requests
 from knowledge import UNIVERS_FLOW_KNOWLEDGE
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-70b-versatile")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "mixtral-8x7b-32768")
 X_EMAIL        = os.environ.get("X_EMAIL", "")
 X_PASSWORD     = os.environ.get("X_PASSWORD", "")
 X_USERNAME     = os.environ.get("X_USERNAME", "")
@@ -30,7 +30,8 @@ def load_history():
         try:
             data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
             return data if isinstance(data, list) else []
-        except Exception:
+        except Exception as e:
+            print(f"Warning: Error loading history: {e}")
             return []
     return []
 
@@ -71,15 +72,30 @@ Output ONLY the tweet text. No quotes, no labels."""
     }
 
     for attempt in range(4):
-        r = requests.post(url, headers=headers, json=payload, timeout=60)
-        if r.status_code == 200:
-            text = r.json()["choices"][0]["message"]["content"].strip().strip('"').strip("'").strip()
-            return text, angle
-        if r.status_code in (429, 503, 500):
-            time.sleep(15 * (attempt + 1))
-            continue
-        print(f"Groq error {r.status_code}: {r.text}")
-        r.raise_for_status()
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=60)
+            if r.status_code == 200:
+                text = r.json()["choices"][0]["message"]["content"].strip().strip('"').strip("'").strip()
+                return text, angle
+            if r.status_code in (429, 503, 500):
+                print(f"Groq error {r.status_code} (attempt {attempt + 1}/4), retrying...")
+                time.sleep(15 * (attempt + 1))
+                continue
+            if r.status_code == 400:
+                error_msg = r.json().get("error", {}).get("message", "Unknown error")
+                print(f"Groq API error (400): {error_msg}")
+                if "decommissioned" in error_msg.lower():
+                    sys.exit(f"ERROR: Model '{GROQ_MODEL}' is decommissioned. Check https://console.groq.com/docs/models for active models.")
+                r.raise_for_status()
+            else:
+                print(f"Unexpected error {r.status_code}: {r.text}")
+                r.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print(f"Request error (attempt {attempt + 1}/4): {e}")
+            if attempt < 3:
+                time.sleep(10)
+                continue
+            raise
     raise RuntimeError("Groq unavailable after retries — try again later.")
 
 def post_to_x_selenium(text):
@@ -166,13 +182,14 @@ def post_to_x_selenium(text):
                 break
             for btn_text in ["Skip for now", "Skip", "Next", "Continue", "Done", "Agree"]:
                 try:
-                    btns = driver.find_elements(By.XPATH, f"//span[text()='{btn_text}']")
+                    btns = driver.find_elements(By.XPATH, f"//span[contains(text(), '{btn_text}')]")
                     if btns:
                         driver.execute_script("arguments[0].click();", btns[0])
                         print(f"Clicked '{btn_text}'")
                         time.sleep(3)
                         break
-                except Exception:
+                except Exception as e:
+                    print(f"Could not find button '{btn_text}': {e}")
                     pass
             time.sleep(3)
 
@@ -223,6 +240,9 @@ def post_to_telegram_channel(text):
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID):
         return
     body = text if "universflow.in" in text else f"{text}\n\n🎧 universflow.in"
+    # Cap at Telegram's 4096 character limit
+    if len(body) > 4096:
+        body = body[:4093] + "..."
     try:
         r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHANNEL_ID, "text": body}, timeout=30)
         print("Posted to Telegram." if r.status_code == 200 else f"Telegram failed: {r.text[:200]}")
