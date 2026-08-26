@@ -109,6 +109,8 @@ def post_to_x_selenium(text):
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
 
     options = Options()
     options.add_argument("--headless=new")
@@ -121,7 +123,8 @@ def post_to_x_selenium(text):
     options.add_experimental_option("useAutomationExtension", False)
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-    driver = webdriver.Chrome(options=options)
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     wait = WebDriverWait(driver, 40)
 
     try:
