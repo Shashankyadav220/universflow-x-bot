@@ -103,15 +103,21 @@ Output ONLY the tweet text. No quotes, no labels."""
     raise RuntimeError("Groq unavailable after retries — try again later.")
 
 def post_to_x_selenium(text):
-    from selenium import webdriver
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.common.keys import Keys
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
+    print("[SELENIUM] Starting imports...")
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+        print("[SELENIUM] Imports successful")
+    except Exception as e:
+        print(f"[SELENIUM] Import failed: {e}")
+        raise
 
+    print("[SELENIUM] Configuring Chrome options...")
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -123,8 +129,34 @@ def post_to_x_selenium(text):
     options.add_experimental_option("useAutomationExtension", False)
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    print("[SELENIUM] Installing ChromeDriver via webdriver-manager...")
+    try:
+        from webdriver_manager.chrome import ChromeDriverManager
+        driver_path = ChromeDriverManager().install()
+        print(f"[SELENIUM] ChromeDriver installed at: {driver_path}")
+    except Exception as e:
+        print(f"[SELENIUM] ChromeDriver installation failed: {e}")
+        raise
+
+    print("[SELENIUM] Creating Service object...")
+    try:
+        service = Service(driver_path)
+        print("[SELENIUM] Service created successfully")
+    except Exception as e:
+        print(f"[SELENIUM] Service creation failed: {e}")
+        raise
+
+    print("[SELENIUM] Initializing Chrome WebDriver...")
+    driver = None
+    try:
+        driver = webdriver.Chrome(service=service, options=options)
+        print("[SELENIUM] WebDriver initialized")
+    except Exception as e:
+        print(f"[SELENIUM] WebDriver initialization failed: {e}")
+        if driver:
+            driver.quit()
+        raise
+
     wait = WebDriverWait(driver, 40)
 
     try:
@@ -230,10 +262,15 @@ def post_to_x_selenium(text):
         print("✅ Posted to X successfully!")
 
     except Exception as e:
+        print(f"[SELENIUM] Exception occurred: {e}")
         driver.save_screenshot("/tmp/selenium_error.png")
         raise e
     finally:
-        driver.quit()
+        print("[SELENIUM] Closing WebDriver...")
+        try:
+            driver.quit()
+        except Exception as e:
+            print(f"[SELENIUM] Error closing driver: {e}")
 
 def send_telegram(message):
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
