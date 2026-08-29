@@ -1,8 +1,8 @@
 import os, sys, json, time, random, pathlib, requests
 from knowledge import UNIVERS_FLOW_KNOWLEDGE
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL     = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 X_EMAIL        = os.environ.get("X_EMAIL", "")
 X_PASSWORD     = os.environ.get("X_PASSWORD", "")
 X_USERNAME     = os.environ.get("X_USERNAME", "")
@@ -13,16 +13,16 @@ HISTORY_FILE = pathlib.Path("history.json")
 MAX_LEN = 275
 
 ANGLES = [
-    "Share one specific feature and why it's genuinely useful (e.g. offline downloads, free streaming, follow artists).",
-    "Ask the audience a casual, relatable music question (no link, just start a conversation).",
-    "Post a relatable everyday music moment (commute, gym, study, late-night vibes) and tie it to the app naturally.",
-    "Position it as a free alternative to paid streaming apps, friendly and confident.",
-    "Drop a quick tip about how to do something in the app (like saving songs for offline).",
-    "Hype a benefit: zero cost, millions of songs, listen offline — keep it punchy and real.",
-    "Talk to students / people who don't want to pay for music.",
-    "Mention it works on Android + as a web app, super easy to start in seconds.",
-    "A short, confident one-liner with personality and a soft call to try it.",
-    "Celebrate the community / vibe of discovering new artists and trending tracks.",
+    "Share one specific feature and why it's genuinely useful (offline downloads, free streaming, follow artists).",
+    "Ask the audience a casual relatable music question - no link, just conversation.",
+    "Post a relatable everyday music moment (commute, gym, study, late-night) tied to the app.",
+    "Position it as a free alternative to paid streaming, friendly and confident.",
+    "Quick tip about how to use the app like saving songs for offline listening.",
+    "Hype a benefit: zero cost, millions of songs, listen offline - punchy and real.",
+    "Talk to students and people who do not want to pay for music.",
+    "Mention it works on Android and as a web app, easy to start in seconds.",
+    "Short confident one-liner with personality and soft call to try it.",
+    "Celebrate discovering new artists and trending tracks.",
 ]
 
 def load_history():
@@ -30,8 +30,7 @@ def load_history():
         try:
             data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
             return data if isinstance(data, list) else []
-        except Exception as e:
-            print(f"Warning: Error loading history: {e}")
+        except Exception:
             return []
     return []
 
@@ -40,84 +39,73 @@ def save_history(history):
 
 def generate_post(history):
     angle = random.choice(ANGLES)
-    recent = "\n".join(f"- {h}" for h in history[-15:]) or "(no posts yet)"
-    prompt = f"""You are the social media voice of Univers Flow, writing ONE tweet (X post).
-Use ONLY the facts in this knowledge base:
+    recent = "\n".join(f"- {h}" for h in history[-10:]) or "none"
+
+    system = "You are a social media manager for Univers Flow music app. Write short punchy tweets. Always respond with ONLY the tweet text, nothing else. No quotes, no labels, no preamble, no explanation."
+
+    user = f"""Write one tweet for Univers Flow music app.
+
+App facts:
 {UNIVERS_FLOW_KNOWLEDGE}
 
-ANGLE: {angle}
+Angle: {angle}
 
-RULES:
-- Sound like a real person, casual and natural.
-- UNDER 275 characters total.
-- 0-2 emojis max, sometimes none.
-- 0-2 hashtags max, often none.
-- Include https://universflow.in only sometimes.
-- NO corporate buzzwords.
+Rules:
+- Under 275 characters
+- Sound like a real person, casual
+- 0 to 2 emojis max
+- 0 to 2 hashtags max  
+- Include https://universflow.in in about half the posts
+- No corporate language
 
-AVOID repeating: {recent}
+Recent posts to avoid repeating:
+{recent}
 
-Output ONLY the tweet text. No quotes, no labels."""
+Reply with ONLY the tweet text."""
 
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": GROQ_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 1.0,
-        "max_tokens": 200,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ],
+        "temperature": 0.9,
+        "max_tokens": 150,
+        "stop": ["\n\n"],
     }
 
     for attempt in range(4):
-        try:
-            r = requests.post(url, headers=headers, json=payload, timeout=60)
-            if r.status_code == 200:
-                text = r.json()["choices"][0]["message"]["content"].strip().strip('"').strip("'").strip()
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+        if r.status_code == 200:
+            data = r.json()
+            print(f"Groq raw response: {data}")
+            text = data["choices"][0]["message"]["content"].strip()
+            text = text.strip('"').strip("'").strip()
+            if text:
                 return text, angle
-            if r.status_code in (429, 503, 500):
-                print(f"Groq error {r.status_code} (attempt {attempt + 1}/4), retrying...")
-                time.sleep(15 * (attempt + 1))
-                continue
-            if r.status_code == 400:
-                error_msg = r.json().get("error", {}).get("message", "Unknown error")
-                print(f"Groq API error (400): {error_msg}")
-                if "decommissioned" in error_msg.lower():
-                    sys.exit(f"ERROR: Model '{GROQ_MODEL}' is decommissioned. Check https://console.groq.com/docs/models for active models.")
-                r.raise_for_status()
-            elif r.status_code == 404:
-                error_msg = r.json().get("error", {}).get("message", "Unknown error")
-                print(f"Groq API error (404): {error_msg}")
-                sys.exit(f"ERROR: Model '{GROQ_MODEL}' does not exist or you don't have access. Check https://console.groq.com/docs/models for available models.")
-            else:
-                print(f"Unexpected error {r.status_code}: {r.text}")
-                r.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            print(f"Request error (attempt {attempt + 1}/4): {e}")
-            if attempt < 3:
-                time.sleep(10)
-                continue
-            raise
-    raise RuntimeError("Groq unavailable after retries — try again later.")
+            print("Empty response, retrying...")
+            time.sleep(5)
+            continue
+        if r.status_code in (429, 503, 500):
+            print(f"Groq {r.status_code}, retrying in {15*(attempt+1)}s...")
+            time.sleep(15 * (attempt + 1))
+            continue
+        print(f"Groq error {r.status_code}: {r.text}")
+        r.raise_for_status()
+    raise RuntimeError("Groq failed after retries.")
 
 def post_to_x_selenium(text):
-    print("[SELENIUM] Starting imports...")
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.common.keys import Keys
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.webdriver.chrome.options import Options
-        from selenium.webdriver.chrome.service import Service
-        print("[SELENIUM] Imports successful")
-    except Exception as e:
-        print(f"[SELENIUM] Import failed: {e}")
-        raise
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
 
-    print("[SELENIUM] Configuring Chrome options...")
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -129,123 +117,139 @@ def post_to_x_selenium(text):
     options.add_experimental_option("useAutomationExtension", False)
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-    print("[SELENIUM] Installing ChromeDriver via webdriver-manager...")
-    try:
-        from webdriver_manager.chrome import ChromeDriverManager
-        driver_path = ChromeDriverManager().install()
-        print(f"[SELENIUM] ChromeDriver installed at: {driver_path}")
-    except Exception as e:
-        print(f"[SELENIUM] ChromeDriver installation failed: {e}")
-        raise
-
-    print("[SELENIUM] Creating Service object...")
-    try:
-        service = Service(driver_path)
-        print("[SELENIUM] Service created successfully")
-    except Exception as e:
-        print(f"[SELENIUM] Service creation failed: {e}")
-        raise
-
-    print("[SELENIUM] Initializing Chrome WebDriver...")
-    driver = None
-    try:
-        driver = webdriver.Chrome(service=service, options=options)
-        print("[SELENIUM] WebDriver initialized")
-    except Exception as e:
-        print(f"[SELENIUM] WebDriver initialization failed: {e}")
-        if driver:
-            driver.quit()
-        raise
-
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     wait = WebDriverWait(driver, 40)
 
     try:
-        # Use twitter.com login which uses standard HTML form
         print("Opening login page...")
-        driver.get("https://twitter.com/login")
-        time.sleep(5)
+        driver.get("https://x.com/i/flow/login")
+        time.sleep(6)
         print(f"URL: {driver.current_url}")
-        driver.save_screenshot("/tmp/step1_login.png")
+        driver.save_screenshot("/tmp/step1.png")
 
-        # Email
-        print("Entering email...")
-        email_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[autocomplete="username"]')))
-        email_input.click()
+        # Find ANY visible input on the page
+        print("Looking for email input...")
+        email_input = None
+        for attempt in range(3):
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            print(f"Found {len(inputs)} input(s) on page")
+            for inp in inputs:
+                try:
+                    if inp.is_displayed():
+                        print(f"  Visible input: type={inp.get_attribute('type')} name={inp.get_attribute('name')} autocomplete={inp.get_attribute('autocomplete')}")
+                        email_input = inp
+                        break
+                except Exception:
+                    continue
+            if email_input:
+                break
+            print(f"No visible input found, waiting... (attempt {attempt+1})")
+            time.sleep(3)
+
+        if not email_input:
+            driver.save_screenshot("/tmp/no_input.png")
+            raise RuntimeError("No visible input found on login page.")
+
+        print("Typing email...")
+        driver.execute_script("arguments[0].click();", email_input)
         time.sleep(0.5)
         for char in X_EMAIL:
             email_input.send_keys(char)
             time.sleep(0.05)
-        time.sleep(1)
         email_input.send_keys(Keys.RETURN)
-        time.sleep(3)
-        driver.save_screenshot("/tmp/step2_after_email.png")
-        print(f"URL after email: {driver.current_url}")
+        time.sleep(4)
+        driver.save_screenshot("/tmp/step2.png")
 
-        # Unusual activity check
+        # Username verification check
         try:
             unusual = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[data-testid="ocfEnterTextTextInput"]')))
-            print("Username verification needed...")
+            print("Username verification...")
             for char in X_USERNAME:
                 unusual.send_keys(char)
                 time.sleep(0.05)
             unusual.send_keys(Keys.RETURN)
             time.sleep(3)
         except Exception:
-            print("No username verification needed.")
+            print("No username verification.")
 
         # Password
-        print("Entering password...")
-        pwd_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="password"]')))
-        print(f"Password input found. Type: {pwd_input.get_attribute('type')}")
-        pwd_input.click()
+        print("Looking for password input...")
+        time.sleep(2)
+        driver.save_screenshot("/tmp/step3.png")
+
+        pwd_input = None
+        for sel in ['input[name="password"]', 'input[type="password"]']:
+            try:
+                pwd_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
+                print(f"Found password: {sel}")
+                break
+            except Exception:
+                continue
+
+        if not pwd_input:
+            # Find any input that appeared after email step
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            for inp in inputs:
+                try:
+                    t = inp.get_attribute('type')
+                    if t in ('password', 'text') and inp.is_displayed():
+                        pwd_input = inp
+                        print(f"Found password via tag search: type={t}")
+                        break
+                except Exception:
+                    continue
+
+        if not pwd_input:
+            raise RuntimeError("Cannot find password input.")
+
+        # Make it clickable and type
+        driver.execute_script("""
+            var el = arguments[0];
+            el.style.cssText = 'opacity:1!important;pointer-events:auto!important;position:relative!important;';
+            el.focus();
+        """, pwd_input)
         time.sleep(0.5)
+        active = driver.switch_to.active_element
         for char in X_PASSWORD:
-            pwd_input.send_keys(char)
+            active.send_keys(char)
             time.sleep(0.05)
-        time.sleep(1)
-        driver.save_screenshot("/tmp/step3_password_filled.png")
-        pwd_input.send_keys(Keys.RETURN)
+        time.sleep(0.5)
+        active.send_keys(Keys.RETURN)
         time.sleep(6)
         print(f"URL after login: {driver.current_url}")
-        driver.save_screenshot("/tmp/step4_after_login.png")
+        driver.save_screenshot("/tmp/step4.png")
 
-        # Check login success
-        if "login" in driver.current_url and "home" not in driver.current_url:
-            raise RuntimeError(f"Login failed. Still at: {driver.current_url}")
+        if "mode=login" in driver.current_url:
+            raise RuntimeError(f"Login failed. URL: {driver.current_url}")
 
         # Handle intermediate pages
         for _ in range(8):
             cur = driver.current_url
-            print(f"Current: {cur}")
-            if "x.com/home" in cur or "twitter.com/home" in cur:
+            if "/home" in cur:
                 break
-            for btn_text in ["Skip for now", "Skip", "Next", "Continue", "Done", "Agree"]:
+            print(f"Intermediate: {cur}")
+            for btn in ["Skip for now", "Skip", "Next", "Continue", "Done", "Agree"]:
                 try:
-                    btns = driver.find_elements(By.XPATH, f"//span[contains(text(), '{btn_text}')]")
-                    if btns:
-                        driver.execute_script("arguments[0].click();", btns[0])
-                        print(f"Clicked '{btn_text}'")
+                    els = driver.find_elements(By.XPATH, f"//span[text()='{btn}']")
+                    if els:
+                        driver.execute_script("arguments[0].click();", els[0])
+                        print(f"Clicked '{btn}'")
                         time.sleep(3)
                         break
-                except Exception as e:
-                    print(f"Could not find button '{btn_text}': {e}")
+                except Exception:
                     pass
             time.sleep(3)
 
-        # Navigate to home
         driver.get("https://x.com/home")
         time.sleep(5)
-        print(f"Home: {driver.current_url}")
-        driver.save_screenshot("/tmp/step5_home.png")
+        driver.save_screenshot("/tmp/step5.png")
 
         # Compose
-        print("Finding compose button...")
         compose_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[data-testid="SideNav_NewTweet_Button"]')))
         compose_btn.click()
         time.sleep(3)
 
-        # Type
-        print("Typing post...")
         tweet_box = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[data-testid="tweetTextarea_0"]')))
         tweet_box.click()
         time.sleep(0.5)
@@ -254,23 +258,16 @@ def post_to_x_selenium(text):
             time.sleep(0.03)
         time.sleep(2)
 
-        # Submit
-        print("Clicking Post button...")
         post_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="tweetButtonInline"]')))
         post_btn.click()
         time.sleep(5)
         print("✅ Posted to X successfully!")
 
     except Exception as e:
-        print(f"[SELENIUM] Exception occurred: {e}")
         driver.save_screenshot("/tmp/selenium_error.png")
         raise e
     finally:
-        print("[SELENIUM] Closing WebDriver...")
-        try:
-            driver.quit()
-        except Exception as e:
-            print(f"[SELENIUM] Error closing driver: {e}")
+        driver.quit()
 
 def send_telegram(message):
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
@@ -284,9 +281,6 @@ def post_to_telegram_channel(text):
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID):
         return
     body = text if "universflow.in" in text else f"{text}\n\n🎧 universflow.in"
-    # Cap at Telegram's 4096 character limit
-    if len(body) > 4096:
-        body = body[:4093] + "..."
     try:
         r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHANNEL_ID, "text": body}, timeout=30)
         print("Posted to Telegram." if r.status_code == 200 else f"Telegram failed: {r.text[:200]}")
