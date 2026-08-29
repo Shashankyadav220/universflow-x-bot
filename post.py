@@ -93,6 +93,12 @@ Reply with ONLY the tweet text."""
             time.sleep(15 * (attempt + 1))
             continue
         print(f"Groq error {r.status_code}: {r.text}")
+        if r.status_code == 404:
+            try:
+                models_r = requests.get("https://api.groq.com/openai/v1/models", headers=headers, timeout=30)
+                print(f"Available Groq models: {[m['id'] for m in models_r.json().get('data', [])]}")
+            except Exception as ex:
+                print(f"Could not list models: {ex}")
         r.raise_for_status()
     raise RuntimeError("Groq failed after retries.")
 
