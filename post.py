@@ -72,7 +72,8 @@ Reply with ONLY the tweet text."""
             {"role": "user", "content": user}
         ],
         "temperature": 0.9,
-        "max_tokens": 150,
+        "max_tokens": 600,
+        "reasoning_effort": "low",
         "stop": ["\n\n"],
     }
 
@@ -81,8 +82,21 @@ Reply with ONLY the tweet text."""
         if r.status_code == 200:
             data = r.json()
             print(f"Groq raw response: {data}")
-            text = data["choices"][0]["message"]["content"].strip()
+            message = data["choices"][0]["message"]
+            text = (message.get("content") or "").strip()
             text = text.strip('"').strip("'").strip()
+
+            # Fallback: some reasoning-model responses only populate
+            # `reasoning` and leave `content` empty. Try to salvage
+            # a usable line from the reasoning trace before retrying.
+            if not text and message.get("reasoning"):
+                reasoning_text = message["reasoning"].strip()
+                lines = [ln.strip() for ln in reasoning_text.splitlines() if ln.strip()]
+                if lines:
+                    candidate = lines[-1].strip('"').strip("'").strip()
+                    if 10 < len(candidate) <= MAX_LEN and not candidate.lower().startswith(("we ", "let", "so ", "need", "must")):
+                        text = candidate
+
             if text:
                 return text, angle
             print("Empty response, retrying...")
