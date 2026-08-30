@@ -10,6 +10,7 @@ TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID", "")
 TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 HISTORY_FILE = pathlib.Path("history.json")
+COOKIES_FILE = pathlib.Path("x_cookies.json")
 MAX_LEN = 275
 
 ANGLES = [
@@ -116,12 +117,8 @@ Reply with ONLY the tweet text."""
         r.raise_for_status()
     raise RuntimeError("Groq failed after retries.")
 
-def post_to_x_selenium(text):
+def _new_driver():
     from selenium import webdriver
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.common.keys import Keys
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
@@ -138,150 +135,219 @@ def post_to_x_selenium(text):
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
     service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
-    wait = WebDriverWait(driver, 40)
+    return webdriver.Chrome(service=service, options=options)
+
+def load_cookies_into_driver(driver):
+    """Load previously saved X session cookies. Returns True if a cookie file existed and was applied."""
+    if not COOKIES_FILE.exists():
+        return False
+    try:
+        cookies = json.loads(COOKIES_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Could not read cookies file: {e}")
+        return False
+
+    driver.get("https://x.com")
+    time.sleep(2)
+    for c in cookies:
+        cookie = {k: v for k, v in c.items() if k in ("name", "value", "domain", "path", "expiry", "secure", "httpOnly")}
+        cookie.setdefault("domain", ".x.com")
+        try:
+            driver.add_cookie(cookie)
+        except Exception as e:
+            print(f"Skipping cookie {c.get('name')}: {e}")
+    return True
+
+def save_cookies_from_driver(driver):
+    try:
+        cookies = driver.get_cookies()
+        COOKIES_FILE.write_text(json.dumps(cookies), encoding="utf-8")
+        print("Session cookies saved for next run.")
+    except Exception as e:
+        print(f"Could not save cookies: {e}")
+
+def login_with_credentials(driver, wait):
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+
+    print("Opening login page...")
+    driver.get("https://x.com/i/flow/login")
+    time.sleep(6)
+    print(f"URL: {driver.current_url}")
+    driver.save_screenshot("/tmp/step1.png")
+
+    print("Looking for email input...")
+    email_input = None
+    for attempt in range(3):
+        inputs = driver.find_elements(By.TAG_NAME, "input")
+        print(f"Found {len(inputs)} input(s) on page")
+        for inp in inputs:
+            try:
+                if inp.is_displayed():
+                    print(f"  Visible input: type={inp.get_attribute('type')} name={inp.get_attribute('name')} autocomplete={inp.get_attribute('autocomplete')}")
+                    email_input = inp
+                    break
+            except Exception:
+                continue
+        if email_input:
+            break
+        print(f"No visible input found, waiting... (attempt {attempt+1})")
+        time.sleep(3)
+
+    if not email_input:
+        driver.save_screenshot("/tmp/no_input.png")
+        raise RuntimeError("No visible input found on login page.")
+
+    print("Typing email...")
+    driver.execute_script("arguments[0].click();", email_input)
+    time.sleep(0.5)
+    for char in X_EMAIL:
+        email_input.send_keys(char)
+        time.sleep(0.05)
+    email_input.send_keys(Keys.RETURN)
+    time.sleep(4)
+    driver.save_screenshot("/tmp/step2.png")
 
     try:
-        print("Opening login page...")
-        driver.get("https://x.com/i/flow/login")
-        time.sleep(6)
-        print(f"URL: {driver.current_url}")
-        driver.save_screenshot("/tmp/step1.png")
-
-        # Find ANY visible input on the page
-        print("Looking for email input...")
-        email_input = None
-        for attempt in range(3):
-            inputs = driver.find_elements(By.TAG_NAME, "input")
-            print(f"Found {len(inputs)} input(s) on page")
-            for inp in inputs:
-                try:
-                    if inp.is_displayed():
-                        print(f"  Visible input: type={inp.get_attribute('type')} name={inp.get_attribute('name')} autocomplete={inp.get_attribute('autocomplete')}")
-                        email_input = inp
-                        break
-                except Exception:
-                    continue
-            if email_input:
-                break
-            print(f"No visible input found, waiting... (attempt {attempt+1})")
-            time.sleep(3)
-
-        if not email_input:
-            driver.save_screenshot("/tmp/no_input.png")
-            raise RuntimeError("No visible input found on login page.")
-
-        print("Typing email...")
-        driver.execute_script("arguments[0].click();", email_input)
-        time.sleep(0.5)
-        for char in X_EMAIL:
-            email_input.send_keys(char)
+        unusual = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[data-testid="ocfEnterTextTextInput"]')))
+        print("Username verification...")
+        for char in X_USERNAME:
+            unusual.send_keys(char)
             time.sleep(0.05)
-        email_input.send_keys(Keys.RETURN)
-        time.sleep(4)
-        driver.save_screenshot("/tmp/step2.png")
+        unusual.send_keys(Keys.RETURN)
+        time.sleep(3)
+    except Exception:
+        print("No username verification.")
 
-        # Username verification check
+    print("Looking for password input...")
+    time.sleep(2)
+    driver.save_screenshot("/tmp/step3.png")
+
+    pwd_input = None
+    for sel in ['input[name="password"]', 'input[type="password"]']:
         try:
-            unusual = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[data-testid="ocfEnterTextTextInput"]')))
-            print("Username verification...")
-            for char in X_USERNAME:
-                unusual.send_keys(char)
-                time.sleep(0.05)
-            unusual.send_keys(Keys.RETURN)
-            time.sleep(3)
+            pwd_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
+            print(f"Found password: {sel}")
+            break
         except Exception:
-            print("No username verification.")
+            continue
 
-        # Password
-        print("Looking for password input...")
-        time.sleep(2)
-        driver.save_screenshot("/tmp/step3.png")
-
-        pwd_input = None
-        for sel in ['input[name="password"]', 'input[type="password"]']:
+    if not pwd_input:
+        inputs = driver.find_elements(By.TAG_NAME, "input")
+        for inp in inputs:
             try:
-                pwd_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
-                print(f"Found password: {sel}")
-                break
+                t = inp.get_attribute('type')
+                if t in ('password', 'text') and inp.is_displayed():
+                    pwd_input = inp
+                    print(f"Found password via tag search: type={t}")
+                    break
             except Exception:
                 continue
 
-        if not pwd_input:
-            # Find any input that appeared after email step
-            inputs = driver.find_elements(By.TAG_NAME, "input")
-            for inp in inputs:
-                try:
-                    t = inp.get_attribute('type')
-                    if t in ('password', 'text') and inp.is_displayed():
-                        pwd_input = inp
-                        print(f"Found password via tag search: type={t}")
-                        break
-                except Exception:
-                    continue
+    if not pwd_input:
+        driver.save_screenshot("/tmp/no_password_input.png")
+        raise RuntimeError("Cannot find password input.")
 
-        if not pwd_input:
-            raise RuntimeError("Cannot find password input.")
+    driver.execute_script("""
+        var el = arguments[0];
+        el.style.cssText = 'opacity:1!important;pointer-events:auto!important;position:relative!important;';
+        el.focus();
+    """, pwd_input)
+    time.sleep(0.5)
+    active = driver.switch_to.active_element
+    for char in X_PASSWORD:
+        active.send_keys(char)
+        time.sleep(0.05)
+    time.sleep(0.5)
+    active.send_keys(Keys.RETURN)
+    time.sleep(6)
+    print(f"URL after login: {driver.current_url}")
+    driver.save_screenshot("/tmp/step4.png")
 
-        # Make it clickable and type
-        driver.execute_script("""
-            var el = arguments[0];
-            el.style.cssText = 'opacity:1!important;pointer-events:auto!important;position:relative!important;';
-            el.focus();
-        """, pwd_input)
-        time.sleep(0.5)
-        active = driver.switch_to.active_element
-        for char in X_PASSWORD:
-            active.send_keys(char)
-            time.sleep(0.05)
-        time.sleep(0.5)
-        active.send_keys(Keys.RETURN)
-        time.sleep(6)
-        print(f"URL after login: {driver.current_url}")
-        driver.save_screenshot("/tmp/step4.png")
+    if "mode=login" in driver.current_url:
+        driver.save_screenshot("/tmp/login_failed.png")
+        raise RuntimeError(f"Login failed. URL: {driver.current_url}")
 
-        if "mode=login" in driver.current_url:
-            raise RuntimeError(f"Login failed. URL: {driver.current_url}")
+def go_home_and_dismiss_prompts(driver):
+    from selenium.webdriver.common.by import By
 
-        # Handle intermediate pages
-        for _ in range(8):
-            cur = driver.current_url
-            if "/home" in cur:
-                break
-            print(f"Intermediate: {cur}")
-            for btn in ["Skip for now", "Skip", "Next", "Continue", "Done", "Agree"]:
-                try:
-                    els = driver.find_elements(By.XPATH, f"//span[text()='{btn}']")
-                    if els:
-                        driver.execute_script("arguments[0].click();", els[0])
-                        print(f"Clicked '{btn}'")
-                        time.sleep(3)
-                        break
-                except Exception:
-                    pass
-            time.sleep(3)
-
-        driver.get("https://x.com/home")
-        time.sleep(5)
-        driver.save_screenshot("/tmp/step5.png")
-
-        # Compose
-        compose_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[data-testid="SideNav_NewTweet_Button"]')))
-        compose_btn.click()
+    for _ in range(8):
+        cur = driver.current_url
+        if "/home" in cur:
+            break
+        print(f"Intermediate: {cur}")
+        for btn in ["Skip for now", "Skip", "Next", "Continue", "Done", "Agree"]:
+            try:
+                els = driver.find_elements(By.XPATH, f"//span[text()='{btn}']")
+                if els:
+                    driver.execute_script("arguments[0].click();", els[0])
+                    print(f"Clicked '{btn}'")
+                    time.sleep(3)
+                    break
+            except Exception:
+                pass
         time.sleep(3)
 
-        tweet_box = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[data-testid="tweetTextarea_0"]')))
-        tweet_box.click()
-        time.sleep(0.5)
-        for char in text:
-            tweet_box.send_keys(char)
-            time.sleep(0.03)
-        time.sleep(2)
+    driver.get("https://x.com/home")
+    time.sleep(5)
+    driver.save_screenshot("/tmp/step5.png")
 
-        post_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="tweetButtonInline"]')))
-        post_btn.click()
-        time.sleep(5)
-        print("✅ Posted to X successfully!")
+def is_logged_in(driver):
+    from selenium.webdriver.common.by import By
+    driver.get("https://x.com/home")
+    time.sleep(4)
+    driver.save_screenshot("/tmp/session_check.png")
+    if "mode=login" in driver.current_url or "flow/login" in driver.current_url:
+        return False
+    return len(driver.find_elements(By.CSS_SELECTOR, 'a[data-testid="SideNav_NewTweet_Button"]')) > 0
+
+def compose_and_post(driver, wait, text):
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+
+    compose_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[data-testid="SideNav_NewTweet_Button"]')))
+    compose_btn.click()
+    time.sleep(3)
+
+    tweet_box = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[data-testid="tweetTextarea_0"]')))
+    tweet_box.click()
+    time.sleep(0.5)
+    for char in text:
+        tweet_box.send_keys(char)
+        time.sleep(0.03)
+    time.sleep(2)
+
+    post_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="tweetButtonInline"]')))
+    post_btn.click()
+    time.sleep(5)
+    print("✅ Posted to X successfully!")
+
+def post_to_x_selenium(text):
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    driver = _new_driver()
+    wait = WebDriverWait(driver, 40)
+
+    try:
+        used_cookies = False
+        if load_cookies_into_driver(driver):
+            print("Trying saved session cookies...")
+            if is_logged_in(driver):
+                print("Session cookies valid — skipping login.")
+                used_cookies = True
+            else:
+                print("Saved cookies invalid/expired, falling back to full login.")
+
+        if not used_cookies:
+            login_with_credentials(driver, wait)
+            go_home_and_dismiss_prompts(driver)
+            save_cookies_from_driver(driver)
+
+        compose_and_post(driver, wait, text)
+        # Refresh saved cookies after a successful run so the session stays warm.
+        save_cookies_from_driver(driver)
 
     except Exception as e:
         driver.save_screenshot("/tmp/selenium_error.png")
