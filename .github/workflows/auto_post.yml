@@ -25,6 +25,13 @@ jobs:
           google-chrome --version
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Restore X session cookies
+        uses: actions/cache@v4
+        with:
+          path: x_cookies.json
+          key: x-cookies-${{ github.run_id }}
+          restore-keys: |
+            x-cookies-
       - name: Generate and post to X
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -35,6 +42,19 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
         run: python post.py
+      - name: Save X session cookies
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: x_cookies.json
+          key: x-cookies-${{ github.run_id }}
+      - name: Upload debug screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selenium-screenshots
+          path: /tmp/*.png
+          if-no-files-found: ignore
       - name: Commit history
         if: always()
         continue-on-error: true
